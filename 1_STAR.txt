@@ -1,0 +1,21 @@
+# Author: Eric Zillich, last change: 2024-04-04
+
+Genome alignment RNA/miRNA Sequencing data using STAR
+
+1) Genome indexing
+
+# Using hg38 genome (chr and scaffolds only i.e. primary assembly as recommended in STAR manual) was downloaded from Gencode (https://www.gencodegenes.org/human/) on 23/03/2023.
+
+#mRNA Seq: 101bp read length 
+$ STAR --runThreadN 10 --runMode genomeGenerate --genomeDir ref_genome_mRNA/hg38 --genomeFastaFiles GRCh38.primary_assembly.genome.fa --sjdbGTFfile gencode.v43.primary_assembly.annotation.gtf --sjdbOverhang 100
+
+2) Mapping of fastq files (code example) 
+
+$ STAR --runThreadN 10 --genomeDir /dir/ref_genome_mRNA/hg38 --readFilesIn <(gunzip -c /dir/file_1.fq.gz) <(gunzip -c /dir/file_2.fq.gz) --outSAMtype BAM SortedByCoordinate --quantMode GeneCounts --outFileNamePrefix STAR_aligned/file
+
+3) Subset gtf-file for relevant transcript biotypes 
+
+gtf file from GENCODE contains pseudogenes and Ig loci, these were removed before running the DE analysis 
+
+grep -E '#|gene_type "protein_coding|processed_transcript|lincRNA|3prime_overlapping_ncrna|antisense|non_coding|sense_intronic|sense_overlapping|TEC|known_ncrna|macro_lncRNA|bidirectional_promoter_lncrna|lncRNAsnRNA|snoRNA|rRNA|Mt_tRNA|Mt_rRNA|misc_RNA|miRNA|ribozyme|sRNA|scaRNA|vaultRNA"' gencode.v43.primary_assembly.annotation.gtf > GRCh38.subset.gtf
+

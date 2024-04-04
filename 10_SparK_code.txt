@@ -1,0 +1,98 @@
+# Author: Eric Zillich, last change: 2024-04-04
+# SparK code used as documented in https://github.com/harbourlab/SparK
+$ cd /ENCODE_dlPFC/
+
+# Convert ENCODE files to bedGraph
+$bigWigToBedGraph H3K4me1.bigWig H3K4me1.bedGraph
+$bigWigToBedGraph H3K4me3.bigWig H3K4me3.bedGraph
+$bigWigToBedGraph H3K36me3.bigWig H3K36me3.bedGraph
+$bigWigToBedGraph H3K9me3.bigWig H3K9me3.bedGraph
+$bigWigToBedGraph H3K27ac.bigWig H3K27ac.bedGraph
+$bigWigToBedGraph H3K27me3.bigWig H3K27me3.bedGraph
+
+
+# Convert RNA-seq bams to bedGraph files rnaseq 
+for i in *.bam
+do
+echo "Indexing: "$i
+samtools index $i $i".bai"
+done
+
+# Example code to convert bams to bedGraph files
+$ bamCoverage -b bam1.bam -o bam1.bdg -bs 1 -of bedgraph --numberOfProcessors max/2 --binSize 10 
+
+
+# Execute the plotting script
+
+# ZBTB4 gene
+# RNA-Seq 
+python /SparK-2.6.2_1/SparK.py \
+-pr chr17:7449366-7494263 \
+-tf case1.bdg.gz case2.bdg.gz ... case13.bdg.gz \
+-cf  ctrl1.bdg.gz ctrl2.bdg.gz ... ctrl12.bdg.gz \
+-tg 1 1 1 1 1 1 1 1 1 1 1 1 1 \
+-cg 1 1 1 1 1 1 1 1 1 1 1 1 \
+-gl RNA-Seq \
+-l CUD Ctrl \
+-gtf SparK-2.6.2_1/gencode.v43.primary_assembly.annotation.gtf \
+-pt sine \
+-bed ENCODE_dlPFC/clusters_sig_SparK_viz.bed \
+-bedlab Splicing \
+-bedcol EF1414 \
+-o RNA_seq_ZBTB4_spli \
+-gs yes
+
+
+# Chip seq 
+python SparK-2.6.2_1/SparK.py \
+-pr chr17:7449366-7494263 \
+-cf ENCODE_dlPFC/H3K4me1.bedGraph.gz ENCODE_dlPFC/H3K4me3.bedGraph.gz ENCODE_dlPFC/H3K27ac.bedGraph.gz ENCODE_dlPFC/H3K36me3.bedGraph.gz ENCODE_dlPFC/H3K9me3.bedGraph.gz ENCODE_dlPFC/H3K27me3.bedGraph.gz \
+-gl H3K4me1 H3K4me3 H3K27ac H3K36me3 H3K9me3 H3K27me3 \
+-gtf SparK-2.6.2_1/gencode.v43.primary_assembly.annotation.gtf \
+-o chip_seq_ZBTB4 
+
+# EWAS and GWAS 
+python SparK-2.6.2_1/SparK.py \
+-pr chr17:7449366-7494263 \
+-cf ENCODE_dlPFC/EWASsig.bdg ENCODE_dlPFC/GWASsig.bdg \
+-gl Methylation SNPs \
+-gtf SparK-2.6.2_1/gencode.v43.primary_assembly.annotation.gtf \
+-o EWAS_GWAS_ZBTB4
+
+-pr chr9:136418618-136449845 \
+
+# INPP5E gene
+
+# RNA-Seq 
+python /SparK-2.6.2_1/SparK.py \
+-pr chr9:136418618-136449845 \
+-tf case1.bdg.gz case2.bdg.gz ... case13.bdg.gz \
+-cf  ctrl1.bdg.gz ctrl2.bdg.gz ... ctrl12.bdg.gz \
+-tg 1 1 1 1 1 1 1 1 1 1 1 1 1 \
+-cg 1 1 1 1 1 1 1 1 1 1 1 1 \
+-gl RNA-Seq \
+-l CUD Ctrl \
+-gtf SparK-2.6.2_1/gencode.v43.primary_assembly.annotation.gtf \
+-pt sine \
+-bed ENCODE_dlPFC/clusters_sig_SparK_viz.bed \
+-bedlab Splicing \
+-bedcol EF1414 \
+-o RNA_seq_INPP5E_spli \
+-gs yes
+
+
+# Chip seq 
+python SparK-2.6.2_1/SparK.py \
+-pr chr9:136418618-136449845 \
+-cf ENCODE_dlPFC/H3K4me1.bedGraph.gz ENCODE_dlPFC/H3K4me3.bedGraph.gz ENCODE_dlPFC/H3K27ac.bedGraph.gz ENCODE_dlPFC/H3K36me3.bedGraph.gz ENCODE_dlPFC/H3K9me3.bedGraph.gz ENCODE_dlPFC/H3K27me3.bedGraph.gz \
+-gl H3K4me1 H3K4me3 H3K27ac H3K36me3 H3K9me3 H3K27me3 \
+-gtf SparK-2.6.2_1/gencode.v43.primary_assembly.annotation.gtf \
+-o chip_seq_INPP5E
+
+# EWAS and GWAS 
+python SparK-2.6.2_1/SparK.py \
+-pr chr9:136418618-136449845 \
+-cf ENCODE_dlPFC/EWASsig.bdg ENCODE_dlPFC/GWASsig.bdg \
+-gl Methylation SNPs \
+-gtf SparK-2.6.2_1/gencode.v43.primary_assembly.annotation.gtf \
+-o EWAS_GWAS_INPP5E

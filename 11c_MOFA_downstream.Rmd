@@ -1,0 +1,529 @@
+---
+title: "MOFA Downstream"
+output: html_document
+author: Eric Zillich, adapted from https://raw.githack.com/bioFAM/MOFA2_tutorials/master/R_tutorials/CLL.html and https://raw.githack.com/bioFAM/MOFA2_tutorials/master/R_tutorials/getting_started_R.html
+date: last modification 2024-04-04
+---
+  
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r packages and python, include=FALSE}
+library(MOFA2)
+library(MOFAdata)
+library(data.table)
+library(ggplot2)
+library(tidyverse)
+library(psych)
+library(ggpubr)
+library(dplyr)
+library(clusterProfiler)
+library(enrichplot)
+library(DOSE)
+library(org.Hs.eg.db)
+
+
+reticulate::use_python("/anaconda3/bin/python", required=TRUE)
+```
+
+# Import the model and merge with metadata
+```{r import}
+BA9 <- readRDS("/MOFA_dir/output/MOFA_BA9_trained_model_20240102.rds")
+
+
+# metadata
+pheno_meth_expr <- read.delim("/MOFA_dir/input/pheno_meth_expr.txt")
+colnames(pheno_meth_expr)[1] <- "sample"
+pheno_meth_expr$sample <- as.character(pheno_meth_expr$sample)
+
+samples_metadata(BA9) <- pheno_meth_expr
+```
+
+
+# Inspect the model characteristics
+Check if factors are largely uncorrelated
+```{r check if factors are largely uncorrelated}
+plot_factor_cor(BA9)
+
+```
+Variance decomposition analysis
+```{r variance decomposition analysis}
+p1 <- plot_variance_explained(BA9)
+ggsave("/MOFA_dir/model_factors.pdf",p1, width = 4, height = 5)
+ 
+```
+
+Total variance explained per view
+```{r total variance explained per view}
+p2 <- plot_variance_explained(BA9, plot_total = T)[[2]]
+ggsave("/MOFA_dir/model_varexp.pdf",p2, width = 5, height = 4)
+ 
+```
+
+
+# Factor characterization 
+How are the factors related to molecular processes?
+Association with sample metadata
+- Factor values
+- Feature weights
+- GSEA on mRNA weights
+
+
+# Association with sample metadata
+```{r association with sample metadata}
+
+p3 <- correlate_factors_with_covariates(BA9, abs=F,
+  covariates = colnames(pheno_meth_expr[c("RIN","CUD","pH","Age","PMI","Axis_1_Dependence","Simplified_Axis_1")]), 
+  plot="log_pval"
+)
+ggsave("/MOFA_dir/model_cor_cov.pdf",p3, width = 3, height = 5)
+
+
+metadata <- samples_metadata(BA9)
+rownames(metadata) <- metadata$sample
+f9 <-get_factors(BA9, factors = 9, as.data.frame = FALSE)
+
+meta2 <- merge(metadata,f9$group1,by=0 )
+cor <- psych::corr.test(meta2$Factor9 , meta2$CUD, method = "pearson", 
+        adjust = "BH")
+cor$r #-0.4773093
+cor$p #0.01583205
+
+cor2 <- psych::corr.test(meta2$Factor9 , meta2$Age, method = "pearson", 
+        adjust = "BH")
+cor2$r #0.4698416
+cor2$p #0.01779693
+
+
+wilcox.test(meta2$Factor9[meta2$CUD==1],meta2$Factor9[meta2$CUD==0])#p-value = 0.022
+```
+
+
+# Plot feature weights
+```{r plot feature weights}
+# Score for each feature on each factor -> large values for features having strong associations with a factor
+plot_weights(BA9,
+ view = "Meth",
+ factor = 9,
+ nfeatures = 10,     # Top number of features to highlight
+ scale = T           # Scale weights from -1 to 1
+)
+
+p4 <- plot_top_weights(BA9,
+ view = "Meth",
+ factor = 9,
+ nfeatures = 10,     # Top number of features to highlight
+ scale = T           # Scale weights from -1 to 1
+)
+ggsave("/MOFA_dir/meth_topweights.pdf",p4, width = 5, height = 4)
+
+plot_weights(BA9,
+ view = "Expr",
+ factor = 9,
+ nfeatures = 10,     # Top number of features to highlight
+ scale = T           # Scale weights from -1 to 1
+)
+
+p5 <- plot_top_weights(BA9,
+ view = "Expr",
+ factor = 9,
+ nfeatures = 10,     # Top number of features to highlight
+ scale = T           # Scale weights from -1 to 1
+)
+ggsave("/MOFA_dir/expr_topweights.pdf",p5, width = 5, height = 4)
+
+# Export weight information 
+Expr_weights <- get_weights(BA9,views = "Expr",factor=9)
+Expr_weights <- as.data.frame(Expr_weights$Expr)
+Expr_weights$Gene <- rownames(Expr_weights)
+Expr_weights <- Expr_weights[order(Expr_weights$Factor9,decreasing = T),]
+Expr_weights <- Expr_weights[,c(2,1)]
+write.table(Expr_weights,"/MOFA_dir/expr_weights_factor9.txt",sep=" ",quote=F,row.names = F,col.names = T)
+
+
+Meth_weights <- get_weights(BA9,views = "Meth",factor=9)
+Meth_weights <- as.data.frame(Meth_weights$Meth)
+Meth_weights$CpG <- rownames(Meth_weights)
+Meth_weights <- Meth_weights[order(Meth_weights$Factor9,decreasing = T),]
+Meth_weights <- Meth_weights[,c(2,1)]
+Meth_weights$CpG <- gsub(" - ","-",Meth_weights$CpG)
+write.table(Meth_weights,"/MOFA_dir/Meth_weights_factor9.txt",sep=" ",quote=F,row.names = F,col.names = T)
+
+```
+
+# CUD status association with Factor 9
+```{r plot CUD status association with Factor 1}
+p6 <- plot_factor(BA9, 
+  factors = 9, 
+  color_by = "CUD",
+  add_violin = TRUE,
+  dodge = TRUE
+)+ylim(-0.16,0.16)+scale_fill_manual(values=c("#268989","#E43F3F"))
+ggsave("/MOFA_dir/f9_CUD.pdf",p6, width = 5, height = 4)
+
+p7 <- plot_factor(BA9, 
+  factors = 9, 
+  color_by = "Age",
+  add_violin = TRUE,
+  dodge = TRUE
+)
+ggsave("/MOFA_dir/f9_age.pdf",p7, width = 4, height = 4)
+
+```
+
+```{r GSEA}
+# Create input matrix for GSEA using GO BP terms for human
+library(msigdbr)
+
+# Extract the gene sets from the current GO BP repository to get the genes involved in the pathways
+genesets = msigdbr(species = "human", category = "C5", subcategory = "BP") 
+
+library(SAMBAR)
+# convert the current GO BP gmt file from msigdb to a binary matrix with gene and geneset as columns and rows
+gs <- convertgmt("/MOFA_dir/input/c5.go.bp.v2023.1.Hs.symbols.gmt",unique(genesets$gene_symbol))
+
+# GSEA on positive weights, with default options
+res.positive <- run_enrichment(BA9, 
+  feature.sets = gs, 
+  view = "Expr",
+  sign = "positive"
+)
+
+# GSEA on negative weights, with default options
+res.negative <- run_enrichment(BA9, 
+  feature.sets = gs, 
+  view = "Expr",
+  sign = "negative"
+)
+
+
+plot_enrichment(res.positive, factor = 9, max.pathways = 25)
+
+plot_enrichment_detailed(
+  enrichment.results = res.positive,
+  factor = 9, 
+  max.pathways = 3
+)
+
+plot_enrichment(res.negative, factor = 9, max.pathways = 25)
+
+plot_enrichment_detailed(
+  enrichment.results = res.negative,
+  factor = 9, 
+  max.pathways = 3
+)
+
+
+# Extract enrichment results
+pos_gsea1 <- as.data.frame(res.positive$set.statistics)
+pos_gsea1$TERM <- rownames(pos_gsea1)
+pos_gsea1 <- pos_gsea1[,c("TERM","Factor9")]
+colnames(pos_gsea1)[2] <- "GSEA set statistic"
+pos_gsea2 <- as.data.frame(res.positive$pval.adj)
+pos_gsea2$TERM <- rownames(pos_gsea2)
+pos_gsea2 <- pos_gsea2[,c("TERM","Factor9")]
+colnames(pos_gsea2)[2] <- "padj"
+pos_gsea <- merge(pos_gsea1,pos_gsea2,by="TERM")
+pos_gsea <-pos_gsea[order(pos_gsea$padj,decreasing = F),]
+
+neg_gsea1 <- as.data.frame(res.negative$set.statistics)
+neg_gsea1$TERM <- rownames(neg_gsea1)
+neg_gsea1 <- neg_gsea1[,c("TERM","Factor9")]
+colnames(neg_gsea1)[2] <- "GSEA set statistic"
+neg_gsea2 <- as.data.frame(res.negative$pval.adj)
+neg_gsea2$TERM <- rownames(neg_gsea2)
+neg_gsea2 <- neg_gsea2[,c("TERM","Factor9")]
+colnames(neg_gsea2)[2] <- "padj"
+neg_gsea <- merge(neg_gsea1,neg_gsea2,by="TERM")
+neg_gsea <-neg_gsea[order(neg_gsea$padj,decreasing = F),]
+
+write.table(pos_gsea,"/MOFA_dir/output/MOFA_pos_gsea.txt",sep=";",quote=F,row.names = F,col.names = T)
+write.table(neg_gsea,"/MOFA_dir/output/MOFA_neg_gsea.txt",sep=";",quote=F,row.names = F,col.names = T)
+
+# Visualize in waterfall plot
+library(ggpubr)
+pos_ES <- as.data.frame(res.positive$set.statistics)
+pos_padj <- as.data.frame(res.positive$pval.adj)
+neg_ES <- as.data.frame(res.negative$set.statistics)
+neg_padj <- as.data.frame(res.negative$pval.adj)
+
+# create dataframe for plotting for factor 9
+f9_GSEA <- data.frame(TERM=rep("",times=30),ES=rep(0,times=30), p_adj=rep(0,times=30),weights=c(rep("positive weights",times=15),rep("negative weights",times=15)))
+
+f9_GSEA$p_adj[1:15] <- pos_padj$Factor9[order(pos_padj$Factor9,decreasing = F)]
+f9_GSEA$TERM[1:15] <- rownames(pos_padj[order(pos_padj$Factor9,decreasing = F),])[1:15]
+f9_GSEA$p_adj[16:30] <- neg_padj$Factor9[order(neg_padj$Factor9,decreasing = F)]
+f9_GSEA$TERM[16:30] <- rownames(neg_padj[order(neg_padj$Factor9,decreasing = F),])[1:15]
+
+pos_terms <- pos_ES[rownames(pos_ES) %in% rownames(pos_padj[order(pos_padj$Factor9,decreasing = F),])[1:15],]
+pos_terms <- pos_terms[match(rownames(pos_padj[order(pos_padj$Factor9,decreasing = F),])[1:15],row.names(pos_terms)),]
+neg_terms <- neg_ES[rownames(neg_ES) %in% rownames(neg_padj[order(neg_padj$Factor9,decreasing = F),])[1:15],]
+neg_terms <- neg_terms[match(rownames(neg_padj[order(neg_padj$Factor9,decreasing = F),])[1:15],row.names(neg_terms)),]
+
+f9_GSEA$ES[1:15] <- pos_terms$Factor9
+f9_GSEA$ES[16:30] <- -(neg_terms$Factor9)
+
+# rename pathways and round pvals for plotting
+f9_GSEA$TERM <-  gsub("GOBP_","",f9_GSEA$TERM)
+f9_GSEA$TERM <-  gsub("_"," ",f9_GSEA$TERM)
+f9_GSEA$TERM <-  tolower(f9_GSEA$TERM)
+f9_GSEA$p_adj <- signif(f9_GSEA$p_adj, digits=3)
+f9_GSEA$TERM[f9_GSEA$TERM == "atp synthesis coupled electron transport"] <- "ATP synthesis coupled electron transport"
+f9_GSEA$TERM[f9_GSEA$TERM == "mitochondrial electron transport nadh to ubiquinone"] <- "mitochondrial electron transport NADH to ubiquinone"
+f9_GSEA$sig <- rep("***",times=length(f9_GSEA$TERM))
+
+library(Seurat)
+f9_gsea_plot <- ggbarplot(f9_GSEA, x = "TERM", y = "ES",
+          fill = "weights",               # change fill color by cyl
+          color = "black",            # Set bar border colors to white
+          sort.val = "desc",          # Sort the value in dscending order
+          sort.by.groups = FALSE, 
+          lab.size=4)+ylim(-12.5,12.5)+NoLegend()+xlab(NULL)+scale_fill_manual(values=c("#268989","#E43F3F"))+ylab("GSEA set statistic")+ geom_text(aes(y=2*abs(ES)/ES,label = sig), vjust = 0.8,hjust=0.3,size=8)+coord_flip()+theme_minimal() + theme(text=element_text(size=20))
+
+ggsave("/MOFA_dir/GSEA_factor9_waterfall.pdf",f9_gsea_plot,width=14,height=10)
+
+# Plot detailed enrichment results
+
+# modify the MOFA function 
+plot1 <- function (enrichment.results, factor, alpha = 0.1, max.genes = 5, 
+                   max.pathways = 10, text_size = 3) 
+{
+  stopifnot(is.list(enrichment.results))
+  stopifnot(length(factor) == 1)
+  if (!is.numeric(factor)) {
+    if (!factor %in% colnames(enrichment.results$pval)) 
+      stop(paste0("No feature set enrichment calculated for ", 
+                  factor))
+  }
+  foo <- reshape2::melt(enrichment.results$feature.statistics[, 
+                                                              factor], na.rm = TRUE, value.name = "feature.statistic")
+  foo$feature <- rownames(foo)
+  feature.sets <- enrichment.results$feature.sets
+  feature.sets[feature.sets == 0] <- NA
+  bar <- reshape2::melt(feature.sets, na.rm = TRUE)[, c(1, 
+                                                        2)]
+  colnames(bar) <- c("pathway", "feature")
+  bar$pathway <- as.character(bar$pathway)
+  bar$feature <- as.character(bar$feature)
+  baz <- reshape2::melt(enrichment.results$pval.adj[, factor], 
+                        value.name = "pvalue", na.rm = TRUE)
+  baz$pathway <- rownames(baz)
+  baz <- baz[baz$pvalue <= alpha, , drop = FALSE]
+  if (nrow(baz) == 0) {
+    stop("No siginificant pathways at the specified alpha threshold. \n\n         For an overview use plot_enrichment_heatmap().")
+  }
+  else {
+    if (nrow(baz) > max.pathways) 
+      baz <- head(baz[order(baz$pvalue), ], n = max.pathways)
+  }
+  baz$pathway <- factor(baz$pathway, levels = baz$pathway[order(baz$pvalue, 
+                                                                decreasing = TRUE)])
+  foobar <- merge(foo, bar, by = "feature")
+  tmp <- merge(foobar, baz, by = "pathway")
+  tmp_filt <- top_n(group_by(tmp, pathway), n = max.genes, 
+                    abs(feature.statistic))
+  pathways <- unique(tmp_filt$pathway)
+  df <- data.frame(pathway = pathways, nfeatures = rowSums(feature.sets, 
+                                                           na.rm = TRUE)[pathways])
+  df <- merge(df, baz, by = "pathway")
+  df$pathway_long_name <- sprintf("%s\n (Ngenes = %d) \n (p-val = %0.2g)", 
+                                  df$pathway, df$nfeatures, df$pvalue)
+  tmp <- merge(tmp, df[, c("pathway", "pathway_long_name")], 
+               by = "pathway")
+  tmp_filt <- merge(tmp_filt, df[, c("pathway", "pathway_long_name")], 
+                    by = "pathway")
+  order_pathways <- df$pathway_long_name[order(df$pvalue, decreasing = TRUE)]
+  tmp$pathway_long_name <- factor(tmp$pathway_long_name, levels = order_pathways)
+  tmp_filt$pathway_long_name <- factor(tmp_filt$pathway_long_name, 
+                                       levels = order_pathways)
+  p <- ggplot(tmp, aes_string(x = "pathway_long_name", y = "feature.statistic")) + 
+    geom_text_repel(aes_string(x = "pathway_long_name", y = "feature.statistic", 
+                               label = "feature"), size = text_size, color = "black", 
+                    force = 1, data = tmp_filt) + geom_point(size = 0.5, 
+                                                             color = "lightgrey") + geom_point(aes_string(x = "pathway_long_name", 
+                                                                                                          y = "feature.statistic"), size = 1, color = "black", 
+                                                                                               data = tmp_filt) + labs(x = "", y = "Weight (scaled)", 
+                                                                                                                       title = "")+ ylim(0,0.01) + coord_flip() + theme(axis.line = element_line(color = "black"), 
+                                                                                                                                                                        axis.text.y = element_text(size = rel(0.75), hjust = 1, 
+                                                                                                                                                                                                   color = "black"), axis.text.x = element_text(size = rel(1), 
+                                                                                                                                                                                                                                                vjust = 0.5, color = "black"), axis.title.y = element_blank(), 
+                                                                                                                                                                        legend.position = "none", panel.background = element_blank())
+  return(p)
+}
+
+
+plot2 <- function (enrichment.results, factor, alpha = 0.1, max.genes = 5, 
+          max.pathways = 10, text_size = 3) 
+{
+  stopifnot(is.list(enrichment.results))
+  stopifnot(length(factor) == 1)
+  if (!is.numeric(factor)) {
+    if (!factor %in% colnames(enrichment.results$pval)) 
+      stop(paste0("No feature set enrichment calculated for ", 
+                  factor))
+  }
+  foo <- reshape2::melt(enrichment.results$feature.statistics[, 
+                                                              factor], na.rm = TRUE, value.name = "feature.statistic")
+  foo$feature <- rownames(foo)
+  feature.sets <- enrichment.results$feature.sets
+  feature.sets[feature.sets == 0] <- NA
+  bar <- reshape2::melt(feature.sets, na.rm = TRUE)[, c(1, 
+                                                        2)]
+  colnames(bar) <- c("pathway", "feature")
+  bar$pathway <- as.character(bar$pathway)
+  bar$feature <- as.character(bar$feature)
+  baz <- reshape2::melt(enrichment.results$pval.adj[, factor], 
+                        value.name = "pvalue", na.rm = TRUE)
+  baz$pathway <- rownames(baz)
+  baz <- baz[baz$pvalue <= alpha, , drop = FALSE]
+  if (nrow(baz) == 0) {
+    stop("No siginificant pathways at the specified alpha threshold. \n\n         For an overview use plot_enrichment_heatmap().")
+  }
+  else {
+    if (nrow(baz) > max.pathways) 
+      baz <- head(baz[order(baz$pvalue), ], n = max.pathways)
+  }
+  baz$pathway <- factor(baz$pathway, levels = baz$pathway[order(baz$pvalue, 
+                                                                decreasing = TRUE)])
+  foobar <- merge(foo, bar, by = "feature")
+  tmp <- merge(foobar, baz, by = "pathway")
+  tmp_filt <- top_n(group_by(tmp, pathway), n = max.genes, 
+                    abs(feature.statistic))
+  pathways <- unique(tmp_filt$pathway)
+  df <- data.frame(pathway = pathways, nfeatures = rowSums(feature.sets, 
+                                                           na.rm = TRUE)[pathways])
+  df <- merge(df, baz, by = "pathway")
+  df$pathway_long_name <- sprintf("%s\n (Ngenes = %d) \n (p-val = %0.2g)", 
+                                  df$pathway, df$nfeatures, df$pvalue)
+  tmp <- merge(tmp, df[, c("pathway", "pathway_long_name")], 
+               by = "pathway")
+  tmp_filt <- merge(tmp_filt, df[, c("pathway", "pathway_long_name")], 
+                    by = "pathway")
+  order_pathways <- df$pathway_long_name[order(df$pvalue, decreasing = FALSE)]
+  tmp$pathway_long_name <- factor(tmp$pathway_long_name, levels = order_pathways)
+  tmp_filt$pathway_long_name <- factor(tmp_filt$pathway_long_name, 
+                                       levels = order_pathways)
+  p <- ggplot(tmp, aes_string(x = "pathway_long_name", y = "feature.statistic")) + 
+    geom_text_repel(aes_string(x = "pathway_long_name", y = "feature.statistic", 
+                               label = "feature"), size = text_size, color = "black", 
+                    force = 1, data = tmp_filt) + geom_point(size = 0.5, 
+                                                             color = "lightgrey") + geom_point(aes_string(x = "pathway_long_name", 
+                                                                                                          y = "feature.statistic"), size = 1, color = "black", 
+                                                                                               data = tmp_filt) + labs(x = "", y = "Weight (scaled)", 
+                                                                                                                       title = "")+ ylim(0,0.01) + coord_flip() + theme(axis.line = element_line(color = "black"), 
+                                                                                                                                                          axis.text.y = element_text(size = rel(0.75), hjust = 1, 
+                                                                                                                                                                                     color = "black"), axis.text.x = element_text(size = rel(1), 
+                                                                                                                                                                                                                                  vjust = 0.5, color = "black"), axis.title.y = element_blank(), 
+                                                                                                                                                          legend.position = "none", panel.background = element_blank())
+  return(p)
+}
+
+# Plot using the modified functions
+
+res_pos <- plot2(
+  enrichment.results = res.positive,
+  factor = 9, 
+  max.pathways = 15,
+  max.genes = 5, text_size=4.5
+)
+
+ggsave("/MOFA_dir/GSEA_factor9_detailed_pos.pdf",res_pos,width=9,height=10)
+
+res_neg <- plot1(
+  enrichment.results = res.negative,
+  factor = 9, 
+  max.pathways = 15,
+  max.genes = 5, text_size=4.5
+)
+ggsave("/MOFA_dir/GSEA_factor9_detailed_neg.pdf",res_neg,width=9,height=10)
+
+
+# Extract for converging evidence plot
+
+f9_mRNA <- get_weights(BA9,views="Expr")
+  f9_mRNA<-f9_mRNA$Expr
+  f9_mRNA <- f9_mRNA[,9]
+  f9_mRNA <- sort(f9_mRNA,decreasing = TRUE)
+
+
+#Meth 
+f9_Meth <- get_weights(BA9,views="Meth")
+  f9_Meth<-f9_Meth$Meth
+  f9_Meth <- f9_Meth[,9]
+  f9_Meth <- sort(f9_Meth,decreasing = TRUE)
+write.table(names(f9_mRNA),"/MOFA_dir/results_ranking/6_Factor9_mRNA_loadings.txt",row.names = F,col.names = F,quote=F)  
+  
+  # Export loadings for converging evidence visualization
+  
+  
+  quantile(f9_mRNA,probs=c(0.025,0.25,0.5,0.75,0.975))
+  
+#        2.5%          25%          50%          75%        97.5% 
+# -0.015001708 -0.003626335  0.000563293  0.004574293  0.015167444
+  
+
+  quantile(f9_Meth,probs=c(0.025,0.25,0.5,0.75,0.975))
+#   2.5%          25%          50%          75%        97.5% 
+# -0.145604531 -0.046109412  0.002832227  0.053496722  0.152205286 
+  
+  f9_mRNA_top <- f9_mRNA[f9_mRNA > 0.015167444 | f9_mRNA < -0.015001708]
+write.table(names(f9_mRNA_top),"/zi-flstorage/group_genepi/data/EP/SysMed/Cocaine/BA9_multiome/results_ranking/gene_level/6_Factor9_mRNA_loadings.txt",row.names = F,col.names = F,quote=F)
+
+f9_Meth_top <- f9_Meth[f9_Meth > 0.152205286 | f9_Meth < -0.145604531]
+names_meth <- gsub("*...........-.","",names(f9_Meth_top))
+
+# prepare for missMethyl 
+
+f9_Meth_pos <- f9_Meth[f9_Meth > 0.152205286]
+f9_Meth_neg <- f9_Meth[f9_Meth < -0.145604531]
+
+names_f9_Meth_pos <- gsub(" -.*","",names(f9_Meth_pos))
+names_f9_Meth_neg <- gsub(" -.*","",names(f9_Meth_neg))
+names_meth_all <- gsub(" -.*","",names(f9_Meth))
+
+library(stringr)
+names_meth <- unique(unlist(str_split(names_meth,";")))
+write.table(names_meth,"/MOFA_dir/results_ranking/7_Factor9_meth_loadings.txt",row.names = F,col.names = F,quote=F)
+
+# GO using missMethyl
+library(readr)
+library(data.table)
+library(dplyr)
+library(missMethyl)
+library(IlluminaHumanMethylationEPICanno.ilm10b2.hg19)
+library(IlluminaHumanMethylationEPICanno.ilm10b4.hg19)
+library(ggplot2)
+library(cowplot)
+
+go_res_pos <- gometh(names_f9_Meth_pos, names_meth_all, "GO", "EPIC", T,sig.genes = T)
+go_res_pos <- go_res_pos[order(go_res_pos$P.DE),]
+write.table(go_res_pos,"/MOFA_dir/f9_meth_GO_pos.txt",row.names = F,col.names = F,quote=F,sep=";")
+
+go_res_neg <- gometh(names_f9_Meth_neg, names_meth_all, "GO", "EPIC", T,sig.genes = T)
+go_res_neg <- go_res_neg[order(go_res_neg$P.DE),]
+write.table(go_res_neg,"/MOFA_dir/f9_meth_GO_neg.txt",row.names = F,col.names = F,quote=F,sep=";")
+
+# plot top GO terms
+up_table <- go_res_pos[,c("TERM","P.DE")][c(1:15),]
+up_table$P.DE <- -log10(up_table$P.DE)
+position1 <- rev(up_table$TERM)
+
+p1 <- ggplot(data = up_table, aes(x = P.DE, y = TERM)) + geom_point(size=3,color="#E43F3F") +theme_bw() + ylab("") + xlab("-log10(p)") + scale_y_discrete(limits = position1)+xlim(2,3.7)
+ggsave("/MOFA_dir/output/GO_factor9_meth_pos_weights.pdf",p1,width=8,height=4)
+
+down_table <- go_res_neg[,c("TERM","P.DE")][c(1:15),]
+down_table$P.DE <- -log10(down_table$P.DE)
+position2 <- rev(down_table$TERM)
+
+p2 <- ggplot(data = down_table, aes(x = P.DE, y = TERM)) + geom_point(size=3,color="#268989") +theme_bw() + ylab("") + xlab("-log10(p)") + scale_y_discrete(limits = position2)+xlim(2,3.7) 
+ggsave("/MOFA_dir/output/GO_factor9_meth_neg_weights.pdf",p2,width=8,height=4)
+
+# Plot GO term panel 
+
+library(cowplot)
+pdf("/MOFA_dir/output/GO_meth_f9_panel.pdf",width=14,height=4)
+plot_grid(p1,p2,ncol=2,align="v")
+dev.off()
+
+```

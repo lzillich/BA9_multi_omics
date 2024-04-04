@@ -1,0 +1,89 @@
+# Author: Eric Zillich, last change: 2024-04-04
+Run leafcutter as described in https://davidaknowles.github.io/leafcutter/articles/Usage.html and https://davidaknowles.github.io/leafcutter/
+
+1. Alignment using STAR
+
+# Generate genome index or use genome index corresponding to the RNA-seq files, here the same index as for the STAR alignment for DE analysis is used
+
+# 2-pass mapping needed
+
+1) First alignment step
+
+params=' --runThreadN 10
+--genomeDir /mRNA/reference/ref_genome_mRNA/hg38
+--outSAMstrandField intronMotif
+--outSAMtype BAM SortedByCoordinate
+--quantMode GeneCounts
+--sjdbGTFfile /mRNA/reference/gencode.v43.primary_assembly.annotation.gtf
+'
+
+cd Splicing/
+
+# example code for STAR
+STAR --readFilesIn <(gunzip -c sample1_1.fq.gz) <(gunzip -c sample1_2.fq.gz) --outFileNamePrefix STAR_aligned/sample1 $params 
+
+# Move files to common folder
+mv Splicing/STAR_aligned/DE*SJ.out.tab Splicing/SJ_out/
+
+2) Indexing with SJ_out.tab fils from each sample
+
+cd Splicing/SJ_out/
+
+# filter junctions to increase validity of junctions inserted to the index
+cat *.tab | awk '($5 > 0 && $7 > 2 && $6==0)' | cut -f1-6 | sort | uniq > SJ_filtered.tab
+
+# re-generate genome index with the detected and filtered SJs
+cd mRNA/reference/
+STAR --runMode genomeGenerate --genomeDir GRCh38_index/SJ_index/ --genomeFastaFiles GRCh38.primary_assembly.genome.fa --sjdbGTFfile gencode.v43.primary_assembly.annotation.gtf --sjdbOverhang 100 --runThreadN 10 --sjdbFileChrStartEnd Splicing/SJ_out/SJ_filtered.tab
+
+
+3) 2nd mapping step
+params2=' --runThreadN 10
+--genomeDir /mRNA/reference/GRCh38_index/SJ_index/
+--outSAMstrandField intronMotif
+--outSAMtype BAM SortedByCoordinate
+--quantMode GeneCounts
+--sjdbGTFfile /mRNA/reference/gencode.v43.primary_assembly.annotation.gtf
+'
+
+cd Splicing/
+
+# Example for second mapping step in STAR
+STAR --readFilesIn <(gunzip -c sample1_1.fq.gz) <(gunzip -c sample1_2.fq.gz) --outFileNamePrefix STAR_aligned/2nd_mapping/sample1 $params2 
+
+
+2. Converting BAMs to JUNCs
+
+cd Splicing/
+for bamfile in Splicing/STAR_aligned/2nd_mapping/DE*.bam; do
+    echo Converting $bamfile to $bamfile.junc
+    samtools index $bamfile
+    regtools junctions extract -a 8 -m 50 -s 1 -M 500000 $bamfile -o $bamfile.junc
+    echo $bamfile.junc >> juncfiles.txt
+done
+
+3. Intron clustering
+
+python /leafcutter/clustering/leafcutter_cluster_regtools.py -j juncfiles.txt -m 50 -o CUDvsCtrl -l 500000
+
+# View content
+zcat CUDvsCtrl_perind_numers.counts.gz | more 
+
+# Create group file CUD_Ctrl_groups_file.txt with filenames from CUDvsCtrl and CUD/Ctrl group IDs, tab-separated, confounders can be added as additional columns
+
+# Create exon file for the reference gtf in R as indicated in the vignette
+
+4. Differential splicing analysis
+/leafcutter/scripts/leafcutter_ds.R --num_threads 4 CUDvsCtrl_perind_numers.counts.gz CUD_Ctrl_groupfiles.txt --exon_file=/leafcutter/reference/GRCh38.exons.gtf.gz
+
+
+#### Visualization 
+
+# Prepare results for visualization
+$ cd Splicing/leafviz/
+$ ./download_human_annotation_codes.sh
+$ ./gtf2leafcutter.pl -o annotation_codes/gencode_hg38/ /mRNA/reference/gencode.v43.primary_assembly.annotation.gtf 
+$ ./prepare_results.R Splicing/CUDvsCtrl_perind_numers.counts.gz Splicing/leafcutter_ds_cluster_significance.txt Splicing/leafcutter_ds_effect_sizes.txt -f 1 -m Splicing/CUD_Ctrl_groupfiles.txt annotation_codes/gencode_hg38/ --FDR 1
+
+# Visualize in Shiny app 
+$ ./run_leafviz.R leafviz.RData 
