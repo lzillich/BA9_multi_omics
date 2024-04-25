@@ -1,5 +1,9 @@
 # Author: Eric Zillich, last change: 2024-04-04
 # SparK code used as documented in https://github.com/harbourlab/SparK
+# MAGMA based on documentation at https://vu.data.surfsara.nl/index.php/s/MUiv3y1SFRePnyG
+
+#### SparK ####
+
 $ cd /ENCODE_dlPFC/
 
 # Convert ENCODE files to bedGraph
@@ -54,12 +58,10 @@ python SparK-2.6.2_1/SparK.py \
 # EWAS and GWAS 
 python SparK-2.6.2_1/SparK.py \
 -pr chr17:7449366-7494263 \
--cf ENCODE_dlPFC/EWASsig.bdg ENCODE_dlPFC/GWASsig.bdg \
+-cf ENCODE_dlPFC/EWASsig_hg38.bdg ENCODE_dlPFC/GWASsig_hg38.bdg \
 -gl Methylation SNPs \
 -gtf SparK-2.6.2_1/gencode.v43.primary_assembly.annotation.gtf \
--o EWAS_GWAS_ZBTB4
-
--pr chr9:136418618-136449845 \
+-o EWAS_GWAS_ZBTB4_hg38
 
 # INPP5E gene
 
@@ -92,7 +94,22 @@ python SparK-2.6.2_1/SparK.py \
 # EWAS and GWAS 
 python SparK-2.6.2_1/SparK.py \
 -pr chr9:136418618-136449845 \
--cf ENCODE_dlPFC/EWASsig.bdg ENCODE_dlPFC/GWASsig.bdg \
+-cf ENCODE_dlPFC/EWASsig_hg38.bdg ENCODE_dlPFC/GWASsig_hg38.bdg \
 -gl Methylation SNPs \
 -gtf SparK-2.6.2_1/gencode.v43.primary_assembly.annotation.gtf \
--o EWAS_GWAS_INPP5E
+-o EWAS_GWAS_INPP5E_hg38
+
+
+#### MAGMA gene-based test ####
+
+# Generate annotation file based on 1000 genomes reference as available in the MAGMA download repository
+
+./magma --annotate --snp-loc reference/g1000_eur.bim --gene-loc ncbi37/NCBI37.3.gene.loc --out annotation/anno_GWAS.anno
+
+# Cabana-Dominguez 2019 summary statistics
+
+./magma --bfile reference/g1000_eur --gene-annot annotation/anno_GWAS.anno.genes.annot --pval /Cocaine/2019_Cabana-Dominguez_GWAS_sumstats/MungedSumstats_20220922.txt use=SNP,P ncol=NSTUDY --out results/CUD/CUD_2019
+
+# Look-up of genes of interest in the CUD_2019.genes.out file
+
+
