@@ -1,5 +1,5 @@
 # Differential expression analysis in DESeq2 based on vignette https://www.bioconductor.org/packages/release/bioc/vignettes/DESeq2/inst/doc/DESeq2.html
-# Author: Eric Zillich, last change: 2024-04-04
+# Author: Eric Zillich, last change: 2024-09-02
 
 library(ggplot2)
 library(DESeq2)
@@ -103,22 +103,60 @@ contrast <-  c("CUD", "1", "0")
 
 res <- results(dds, contrast=contrast, alpha = 0.05)
 
+# Calculate deviances and R2 for the DE model (adapted from https://support.bioconductor.org/p/107472/)
+# Initial model 
+dds <- DESeqDataSetFromMatrix(countData = mRNA_CUD_counts,
+                              colData = coldata,
+                              design = ~ CUD + Age + RIN + pH + PMI)
+# Prefiltering
+keep <- rowSums(counts(dds) >= 2) >= 4
+# DE analysis
+dds.full <-dds[keep,]
+
+# Full model
+dds.full <- DESeq(dds.full, test = "Wald", fitType = "parametric",betaPrior = F)
+
+# Other models
+models <- list(
+  all = "~ CUD + Age + RIN + pH + PMI",
+  no.CUD = "~ Age + RIN + pH + PMI",
+  no.Age = "~ RIN + pH + PMI",
+  no.RIN = "~ pH + PMI",
+  no.pH = "~ PMI",
+  null = "~ 1"
+)
+# Deviance calculation
+deviances <- sapply(models[-1], function(m){
+  dds <- dds.full
+  design(dds) <- as.formula(m)
+  dds <- nbinomWaldTest(dds, betaPrior = F) 
+  return(mcols(dds)$deviance)
+})
+
+deviances <- cbind(mcols(dds.full)$deviance, deviances) 
+
+deviances_test <- data.frame(CUD = deviances[,2] - deviances[,1],
+                             no.CUD = deviances[,3] - deviances[,2],
+                             no.Age = deviances[,4] - deviances[,3],
+                             no.RIN = deviances[,5] - deviances[,4],
+                             no.pH = deviances[,6] - deviances[,5]
+) 
+deviances_test$residuals <- (deviances[,6] - (abs(deviances_test$CUD) + abs(deviances_test$no.CUD) 
+                                              + abs(deviances_test$no.Age) + abs(deviances_test$no.RIN) 
+                                              + abs(deviances_test$no.pH)))/deviances[,6]
+
+deviances_test$gene <- rownames(dds.full)
+
+deviances_test$R2 <- 1-deviances_test$residual
+
 #Order genes by adjusted p-value
 res_genes <- as.data.frame(res)
-res_genes_ordered <- res_genes[order(res_genes$padj,decreasing = F), ]
+res_genes$gene <- rownames(res_genes)
+res_genes_R <- merge(res_genes, deviances_test[,c("gene","R2")],by="gene")
+res_genes_Ordered <- res_genes[order(res_genes$pvalue,decreasing = F), ]
+res_genes_Ordered_R <- res_genes_R[order(res_genes_R$pvalue,decreasing = F), ]
 write.table(res_genes_ordered,"/results_dir/DE_results.txt",quote=F,row.names = T,sep=",")
-
-# qqplot
-png("results_dir/DE_qqplot.png", width = 800, height = 800)
-qq(res_genes_ordered$pvalue)
-dev.off()
-
-#calculate Lambda
-Lambda <- qchisq(median(res_genes_ordered$pvalue,na.rm=T), df = 1, lower.tail = F)/qchisq(0.5, 1)
-#Save model number, sample size & lambda to text file:
-Model <- "BA9"
-tab1 <- cbind(Model, Lambda)
-write.table(tab1, file="/results_dir/LAMBDA.txt", row.names=F, quote=F, sep="\t")
+write.table(res_genes_Ordered_R,"/results_dir/DE_results_withR.txt",quote=F,row.names = F,sep=",")
 
 # Save a gene list for drug repurposing analysis with 150 top down and up genes based on the test statistics as used for gsea
 DE_results <- read.csv("/results_dir/DE_results.txt")

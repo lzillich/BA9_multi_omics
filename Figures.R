@@ -65,8 +65,12 @@ list <- list(astrocytes = astro, neurons = neuron,endothelial=endo,oligodendrocy
 library(GeneOverlap)
 gom.obj <- newGOM(list, genome.size = 21364)
 
-pdf("/results_dir/GeneOverlap_DE_celltypes_CUD_associated.pdf", width = 14, height = 14)
-drawHeatmap(gom.obj,cutoff = 0.05,note.col = "red")
+pdf("/zi-flstorage/group_genepi/data/EP/SysMed/Cocaine/BA9_multiome/mRNA/3_DE_results/GeneOverlap_DE_celltypes_CUD_associated_bl.pdf", width = 14, height = 14)
+drawHeatmap(gom.obj,cutoff = 0.05,note.col = "black")
+dev.off()
+
+pdf("/zi-flstorage/group_genepi/data/EP/SysMed/Cocaine/BA9_multiome/mRNA/3_DE_results/GeneOverlap_DE_celltypes_CUD_associated_wh.pdf", width = 14, height = 14)
+drawHeatmap(gom.obj,cutoff = 0.05,note.col = "white")
 dev.off()
 
 # 1c
@@ -670,10 +674,77 @@ ggsave("/WGCNA_dir/GO_modules_BP.pdf",p1,height=9,width=9)
 #Created using Cytoscape STRING as indicated in the methods part of the manuscript
 
 #### Figure S4 ####
+library(data.table)
+library(variancePartition)
+library(readxl)
+library(BiocParallel)
 
-#S4a - created using BioRender.com
+#S4a
+#read pheno
+pheno <- read.csv("/dir/pheno.txt", sep=";")
+pheno$pH[is.na(pheno$pH)] <- 6.335
 
-#S4b - based on downloaded results from CMap (clue.io)
+# Add cibersort cell type estimates
+ciber <- read.csv("/CIBERSORT/Markers_10fold_Yu_He_BA9.txt", sep=";")
+ciber <- ciber[,c(1:7)]
+colnames(ciber)[1] <- "rn"
+
+pheno_cc <- merge(pheno,ciber,by="rn")
+rownames(pheno_cc) <- pheno_cc$rn
+
+pheno_cc <- pheno_cc[,c("PMI","pH","RIN","Age")]
+
+#specify model
+mRNA_CUD <- get(load("/dir//mRNA_CUD_counts.Rdata"))
+colnames(mRNA_CUD$counts) <- gsub("Aligned.sortedByCoord.out.bam","",colnames(mRNA_CUD$counts))
+mRNA_CUD <- as.data.frame(mRNA_CUD$counts)
+keep <- rowSums(mRNA_CUD) >= 1
+mRNA_CUD <- mRNA_CUD[keep,]
+
+form <- ~ Age + pH + PMI + RIN 
+
+varPart <- fitExtractVarPartModel(mRNA_CUD, form, pheno_cc,BPPARAM = MulticoreParam(20))
+vp <- sortCols(varPart)
+
+png("/dir/Variance_partition.png",width = 8,height=8,units = "in",res=300)
+plotVarPart(vp,col=c( "#C77CFF","#00BFC4","#7CAE00","orange","grey85"))
+dev.off()
+
+#S4b
+#### 1. Import phenotype data ####
+Ribeiro_pheno <- read_excel("/dir/Ribeiro_pheno.xlsx")
+
+DT <- data.table
+DF <- data.frame
+
+#### 2. Import counts ####
+
+# CUD
+mRNA_CUD <- get(load("/dir/Ribeiro_mRNA_CUD_counts.Rdata"))
+colnames(mRNA_CUD$counts) <- gsub("_name_sorted.bam","",colnames(mRNA_CUD$counts))
+mRNA_CUD$targets <- gsub("_name_sorted.bam","",mRNA_CUD$targets)
+colnames(mRNA_CUD$stat) <- gsub("_name_sorted.bam","",colnames(mRNA_CUD$stat))
+
+mRNA_CUD_counts <- DF(mRNA_CUD$counts)
+pheno_cc <- Ribeiro_pheno[,c("PMI","pH","RIN","Age")]
+
+#specify model
+keep <- rowSums(mRNA_CUD_counts) >= 1
+mRNA_CUD_counts <- mRNA_CUD_counts[keep,]
+
+form <- ~ Age + pH + PMI + RIN
+
+varPart <- fitExtractVarPartModel(mRNA_CUD_counts, form, pheno_cc,BPPARAM = MulticoreParam(20))
+vp <- sortCols(varPart)
+
+png("/dir/Variance_partition_Ribeiro.png",width = 8,height=8,units = "in",res=300)
+plotVarPart(vp,col=c("orange" ,"#C77CFF","#7CAE00","#00BFC4","grey85"))
+dev.off()
+
+#### Figure S5 ####
+#S5a - created using BioRender.com
+
+#S5b - based on downloaded results from CMap (clue.io)
 library(forcats)
 # Individual perturbagens 
 query_result <- read.delim("/CMap_BA9/arfs/TAG/query_result.gct")
@@ -708,7 +779,7 @@ p1 <- ggplot(pert, aes(reorder(compound,cscore_norm), cscore_norm)) +
        title="perturbagens",legend="sig") + theme_minimal()
 ggsave("/CMap_BA9/perturbagen.pdf",p1,height=6,width=8)
 
-#S4c
+#S5c
 gsea_result <- read.delim("/CMap_BA9/gsea/TAG/arfs/NORM_CS/gsea_result.gct")
 gsea_result <- gsea_result[-1,]
 
@@ -753,7 +824,7 @@ p2 <-ggplot(PCL, aes(fct_reorder(PCL,cscore_norm), cscore_norm)) +
        title="GSEA perturbagen class",legend="sig")
 ggsave("/CMap_BA9/gsea_PCL.pdf",p2,height=6,width=8)
 
-#S4d
+#S5d
 # subset for glucocorticoid inside labels
 glucocort_perturbagens <- query_result_sig[grep("Glucocor",query_result_sig$moa),]
 glucocort_perturbagens <- glucocort_perturbagens[,c("moa","cell_iname","pert_idose","pert_itime","pert_iname","fdr_q_nlog10","norm_cs")]
@@ -770,7 +841,7 @@ p3 <- ggplot(glucocort_perturbagens, aes(reorder(name,norm_cs), norm_cs)) +
        title="Glucocorticoid receptor targeting drugs",legend="sig") + theme_minimal()
 ggsave("/CMap_BA9/glucocort_modulators.pdf",p3,height=6,width=8)
 
-#### Figure S5 ####
+#### Figure S6 ####
 library(MOFA2)
 library(MOFAdata)
 BA9 <- readRDS("/MOFA_dir/output/MOFA_BA9_trained_model_20240102.rds")
@@ -780,18 +851,18 @@ colnames(pheno_meth_expr)[1] <- "sample"
 pheno_meth_expr$sample <- as.character(pheno_meth_expr$sample)
 samples_metadata(BA9) <- pheno_meth_expr
 
-#S5a 
+#S6a 
 p1 <- plot_variance_explained(BA9)
 ggsave("/MOFA_dir/model_factors.pdf",p1, width = 4, height = 5)
 
-#S5b
+#S6b
 p2 <- correlate_factors_with_covariates(BA9, abs=F,
                                         covariates = colnames(pheno_meth_expr[c("RIN","CUD","pH","Age","PMI","Axis_1_Dependence","Simplified_Axis_1")]), 
                                         plot="log_pval"
 )
 ggsave("/MOFA_dir/model_cor_cov.pdf",p2, width = 3, height = 5)
 
-#S5c
+#S6c
 p3 <- plot_factor(BA9, 
                   factors = 9, 
                   color_by = "CUD",
@@ -801,7 +872,7 @@ p3 <- plot_factor(BA9,
 ggsave("/MOFA_dir/f9_CUD.pdf",p3, width = 5, height = 4)
 
 
-#S5d
+#S6d
 p4 <- plot_top_weights(BA9,
                        view = "Meth",
                        factor = 9,
@@ -810,7 +881,7 @@ p4 <- plot_top_weights(BA9,
 )
 ggsave("/MOFA_dir/meth_topweights.pdf",p4, width = 5, height = 4)
 
-#S5e
+#S6e
 p5 <- plot_top_weights(BA9,
                        view = "Expr",
                        factor = 9,
@@ -819,7 +890,7 @@ p5 <- plot_top_weights(BA9,
 )
 ggsave("/MOFA_dir/expr_topweights.pdf",p5, width = 5, height = 4)
 
-#S5f
+#S6f
 # Create input matrix for GSEA using GO BP terms for human
 library(msigdbr)
 # Extract the gene sets from the current GO BP repository to get the genes involved in the pathways
@@ -906,7 +977,7 @@ f9_gsea_plot <- ggbarplot(f9_GSEA, x = "TERM", y = "ES",
 
 ggsave("/MOFA_dir/GSEA_factor9_waterfall.pdf",f9_gsea_plot,width=14,height=10)
 
-#S5g
+#S6g
 #Methylation GO plots
 f9_Meth <- get_weights(BA9,views="Meth")
 f9_Meth<-f9_Meth$Meth
@@ -950,15 +1021,15 @@ down_table <- go_res_neg[,c("TERM","P.DE")][c(1:15),]
 down_table$P.DE <- -log10(down_table$P.DE)
 position2 <- rev(down_table$TERM)
 
-#S5g
+#S6g
 p6 <- ggplot(data = down_table, aes(x = P.DE, y = TERM)) + geom_point(size=3,color="#268989") +theme_bw() + ylab("") + xlab("-log10(p)") + scale_y_discrete(limits = position2)+xlim(2,3.7) 
 ggsave("/MOFA_dir/output/GO_factor9_meth_neg_weights.pdf",p6,width=8,height=4)
 
-#S5h
+#S6h
 p7 <- ggplot(data = up_table, aes(x = P.DE, y = TERM)) + geom_point(size=3,color="#E43F3F") +theme_bw() + ylab("") + xlab("-log10(p)") + scale_y_discrete(limits = position1)+xlim(2,3.7)
 ggsave("/MOFA_dir/output/GO_factor9_meth_pos_weights.pdf",p7,width=8,height=4)
 
-#### Figure S6 ####
+#### Figure S7 ####
 # Integrative GO plot
 # Import the different results files for methylation, expression, WGCNA, MOFA, and splicing
 # EWAS
@@ -1017,5 +1088,5 @@ GO<-pairwise_termsim(GO)
 p1 <- emapplot(GO,legend_n=3,cex_line=0.1,cex_label_category=0.75,layout="nicely",cex_category=0.8,showCategory=20,pie="equal")+scale_fill_manual(values=c("#A6CEE3", "#1F78B4", "#B2DF8A" ,"#33A02C", "#FB9A99", "#E31A1C", "#FDBF6F", "#FF7F00" ,"#CAB2D6", "#6A3D9A"))
 ggsave(paste0("/results_ranking/GO_BP_BA9_multiome.pdf"),p1,height=10,width=10)
 
-#### Figure S7 ####
+#### Figure S8 ####
 # manually created plot
